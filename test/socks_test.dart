@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:darksocks/darksocks.dart';
+import 'package:darksocks/src/util.dart';
 import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 import 'dart:io';
@@ -25,10 +26,10 @@ void main() {
       Logger.root.onRecord.listen((record) {
         print('${record.level.name}: ${record.time}: ${record.message}');
       });
-      proxy = SocksProxy((String uri, Stream<List<int>> conn) async {
+      proxy = SocksProxy((String uri, Conn<List<int>> conn) async {
         print("dial to $uri");
         var raw = await Socket.connect("127.0.0.1", 10023);
-        return raw;
+        return Conn(raw, raw);
       });
       proxy.run("0.0.0.0:10022");
       runEcho();

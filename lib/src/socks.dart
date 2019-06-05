@@ -7,17 +7,17 @@ import 'package:logging/logging.dart';
 
 final _log = Logger("SocksProxy");
 
-typedef Future<Socket> Dialer(String uri, Socket conn);
+typedef Future<Conn<List<int>>> Dialer(String uri, Conn<List<int>> conn);
 
-class SocksTransformer {
-  Socket conn;
+class SocksRunner {
+  Conn<List<int>> conn;
   Dialer dialer;
   String httpUpstream;
   //
   List<int> _pre;
   int _step = 0;
-  Socket _next;
-  SocksTransformer(this.conn, this.dialer, this.httpUpstream);
+  Conn<List<int>> _next;
+  SocksRunner(this.conn, this.dialer, this.httpUpstream);
   void proc() async {
     try {
       await for (var data in this.conn) {
@@ -46,14 +46,15 @@ class SocksTransformer {
     if (this._step == 0x00) {
       if (data[0] != 0x05) {
         if (this.httpUpstream == null || this.httpUpstream.isEmpty) {
-          this.conn.destroy();
+          unawaited(this.conn.close());
           throw "only ver 0x05 is supported, but ${data[0]}";
         }
         _log.fine("SocksProxy proxy connection to http upstream(${httpUpstream}) from ${objectInfo(this.conn)}");
         var parts = this.httpUpstream.split(":");
         var host = parts[0];
         var port = int.parse(parts[1]);
-        this._next = await Socket.connect(host, port);
+        var raw = await Socket.connect(host, port);
+        this._next = Conn(raw, raw);
         this._next.add(data);
         unawaited(this._next.pipe(this.conn));
         return;
@@ -86,7 +87,7 @@ class SocksTransformer {
           data = data.sublist(data[4] + 7);
           break;
         default:
-          this.conn.destroy();
+          unawaited(this.conn.close());
           throw "ATYP ${data[3]} is not supported";
           break;
       }
@@ -105,7 +106,7 @@ class SocksProxy {
   ServerSocket server;
   Dialer dialer;
   String httpUpstream = "";
-  Set<SocksTransformer> conns = Set();
+  Set<SocksRunner> conns = Set();
   SocksProxy(this.dialer);
   void run(String addr) async {
     var parts = addr.split(":");
@@ -114,21 +115,21 @@ class SocksProxy {
     this.server = await ServerSocket.bind(host, port);
     _log.info("SocksProxy listen socks5 proxy on $addr");
     await for (var conn in this.server) {
-      this._runConn(conn);
+      this._runConn(Conn<List<int>>(conn, conn));
     }
   }
 
-  void _runConn(Socket conn) async {
-    var transformer = SocksTransformer(conn, this.dialer, this.httpUpstream);
-    this.conns.add(transformer);
+  void _runConn(Conn<List<int>> conn) async {
+    var runner = SocksRunner(conn, this.dialer, this.httpUpstream);
+    this.conns.add(runner);
     try {
-      _log.finer("SocksProxy proxy connection from ${conn.remoteAddress.address}:${conn.remotePort}");
-      await transformer.proc();
-      _log.finest("SocksProxy proxy connection from ${conn.remoteAddress.address}:${conn.remotePort} is done");
+      _log.finer("SocksProxy proxy connection from ${conn}");
+      await runner.proc();
+      _log.finest("SocksProxy proxy connection from ${conn} is done");
     } catch (e) {
-      _log.finest("SocksProxy proxy connection from ${conn.remoteAddress.address}:${conn.remotePort} is done with $e", e);
+      _log.finest("SocksProxy proxy connection from ${conn} is done with $e", e);
     }
-    this.conns.remove(transformer);
+    this.conns.remove(runner);
   }
 
   void close() async {
