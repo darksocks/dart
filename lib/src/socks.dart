@@ -31,7 +31,6 @@ class SocksTransformer {
   }
 
   void _handlerData(Uint8List data) async {
-    // print("----->$data");
     if (this._next != null) {
       this._next.add(data);
       return;
